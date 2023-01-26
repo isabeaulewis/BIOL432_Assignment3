@@ -1,0 +1,315 @@
+---
+title: "Assignment 3"
+author: "Isabeau Lewis"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+https://github.com/isabeaulewis/BIOL432_Assignment3.git
+
+# Part I: Data Exploration & QA/QC
+
+## 1. Setup
+
+Loading libraries:
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(MASS)
+```
+
+Loading theme:
+```{r}
+source("http://bit.ly/theme_pub")
+theme_set(theme_pub())
+```
+
+Loading data:
+```{r}
+setwd("./data")
+dat<-read.csv("ColauttiBarrett2013Data.csv")
+```
+
+## 2. Inspecting data
+
+```{r}
+names(dat)
+```
+
+All the names look good.
+
+```{r}
+str(dat)
+```
+
+The structure of some variables should be corrected:
+```{r}
+dat <- dat %>% 
+  mutate(Ind = as.factor(Ind),
+         Site = as.factor(Site),
+         Row = as.factor(Row),
+         Pos = as.factor(Pos),
+         Mat = as.factor(Mat),
+         Pop = as.factor(Pop),
+         Region = as.factor(Region),
+         Flwr07 = as.numeric(Flwr07),
+         Fruits07 = as.numeric(Fruits07),
+         Flwr08 = as.numeric(Flwr08),
+         Flwr09 = as.numeric(Flwr09),
+         Flwr10 = as.numeric(Flwr10))
+```
+
+Checking the updated structure:
+```{r}
+str(dat) #everything here looks good
+```
+
+```{r}
+head(dat)
+```
+
+```{r}
+tail(dat)
+```
+
+There are some NAs here. This will pose a problem for LDA, which can't handle NAs. To deal with these, I'll replace the NAs with the mean for the given column.
+
+First, I'll see which columns have NAs:
+```{r}
+dat %>%
+  select_if(function(x) any(is.na(x))) %>%
+  names()
+```
+
+Now, I'll replace the missing values with their column means:
+```{r}
+dat <- dat %>%
+  mutate(Flwr07 = ifelse(is.na(Flwr07),
+                         mean(Flwr07,na.rm=TRUE),Flwr07),
+         Flwr08 = ifelse(is.na(Flwr08),
+                         mean(Flwr08,na.rm=TRUE),Flwr08),
+         Flwr09 = ifelse(is.na(Flwr09),
+                         mean(Flwr09,na.rm=TRUE),Flwr09),
+         Flwr10 = ifelse(is.na(Flwr10),
+                         mean(Flwr10,na.rm=TRUE),Flwr10),
+         FVeg07 = ifelse(is.na(FVeg07),
+                         mean(FVeg07,na.rm=TRUE),FVeg07),
+         FVeg08 = ifelse(is.na(FVeg08),
+                         mean(FVeg08,na.rm=TRUE),FVeg08),
+         FVeg09 = ifelse(is.na(FVeg09),
+                         mean(FVeg09,na.rm=TRUE),FVeg09),
+         FVeg10 = ifelse(is.na(FVeg10),
+                         mean(FVeg10,na.rm=TRUE),FVeg10),
+         InfMass07 = ifelse(is.na(InfMass07),
+                            mean(InfMass07, na.rm=TRUE),InfMass07),
+         InfMass08 = ifelse(is.na(InfMass08),
+                            mean(InfMass08, na.rm=TRUE),InfMass08),
+         InfMass09 = ifelse(is.na(InfMass09),
+                            mean(InfMass09, na.rm=TRUE),InfMass09),
+         InfMass10 = ifelse(is.na(InfMass10),
+                            mean(InfMass10, na.rm=TRUE),InfMass10),
+         HVeg08 = ifelse(is.na(HVeg08),
+                         mean(HVeg08,na.rm=TRUE),HVeg08),
+         HVeg09 = ifelse(is.na(HVeg09),
+                         mean(HVeg09,na.rm=TRUE),HVeg09),
+         HVeg10 = ifelse(is.na(HVeg10),
+                         mean(HVeg10,na.rm=TRUE),HVeg10))
+```
+
+Seeing if I missed any NAs:
+```{r}
+dat %>%
+  select_if(function(x) any(is.na(x))) %>%
+  names()
+```
+
+Nope, I successfully replaced all NAs with their column means!
+
+Now, I'll see if any transformations should be applied to my numerical variables (if they're normal):
+```{r}
+dat_long <- pivot_longer(dat, cols=c("Flwr07", "Flwr08", "Flwr09", "Flwr10", "Fruits07", 
+                                     "FVeg07", "FVeg08", "FVeg09", "FVeg10", 
+                                     "HVeg08", "HVeg09", "HVeg10",
+                                     "InfMass07", "InfMass08", "InfMass09", "InfMass10"),
+                         names_to="measurement",
+                         values_to="value")
+ggplot(dat_long, aes(x=value)) +
+  geom_histogram() +
+  facet_wrap(facets=vars(measurement),
+             ncol=4,
+             scales="free")
+```
+Fruits07 and the InfMass measurements (all years) should be log-transformed, so that's what I'll do next:
+```{r}
+dat <- dat %>%
+  mutate(Fruits07 = log(Fruits07+1),
+         InfMass07 = log(InfMass07+1),
+         InfMass08 = log(InfMass08+1),
+         InfMass09 = log(InfMass09+1),
+         InfMass10 = log(InfMass10+1)) #using +1 so the zeros don't give NaN
+```
+
+
+## 3. Scaling the variables
+I'll scale the features using the method covered in the week 3 tutorial -- mutate_all(scale). Because I only want to do this on my features (numeric variables), I'll first separate the data into features/predictors & response variables:
+
+```{r}
+feat_sc <- dat %>%
+  dplyr::select(starts_with(c("Flwr", "FVeg", "HVeg", "InfMass"))) %>%
+  mutate_all(scale)
+head(feat_sc)
+```
+
+Checking that this worked using Flwr07:
+```{r}
+mean(feat_sc$Flwr07)
+```
+```{r}
+sd(feat_sc$Flwr07)
+```
+
+The mean is ~0 and the standard deviation is 1, which means our scaling worked. Yay!
+
+## 4. Why writing linear models to select appropriate features isn't necessary
+```{r}
+length(dat$Ind)
+```
+
+```{r}
+ncol(feat_sc)
+```
+
+We don't need to select appropriate features because we have many more observations (i.e., individuals -- 432) than we do columns (i.e., predictors -- 15). This means there's no problem with the covariance matrix being bigger than the number of observations, and our analyses will proceed without problems. 
+
+## 5. Creating separate datasets for features & classifying variables
+I've already created a separate dataset (``feat_sc``) when I scaled the predictor variables above, so now I'll just create one for the response variables:
+
+```{r}
+resp_dat <- dat %>%
+  dplyr::select(c("Pop", "Site"))
+head(resp_dat)
+```
+
+
+# Part II: LDA
+
+## 1. Running LDA models to distinguish genetic populations and sites
+
+### a) Site
+```{r}
+LDAmod_s <- lda(x=feat_sc, grouping=resp_dat$Site)
+```
+
+```{r}
+LDAmod_s$counts
+```
+
+
+### b) Population
+```{r}
+LDAmod_p <- lda(x=feat_sc, grouping=resp_dat$Pop)
+```
+
+```{r}
+LDAmod_p$counts
+```
+
+
+## 2. Explaining LD axes needed to distinguish between sites and populations
+The number of LDA axes corresponds to the number of categories of the response variable (as opposed to a PCA, where it corresponds to the number of features). The total number of LD axes will be 1-(# of categories of response variable), because each 'pairwise' comparison is one LD axis (i.e. it takes a binary response for sorting into one category vs all the others, and repeats this for each combination of categories). Thus, there will be two LD axes for the three possible sites and five LD axes for the six possible populations.
+
+## 3. Exploring the objects in the LD models
+
+The scaling slice (below, for site and population) shows you the LD axes from your model, which (as mentioned above) correspond with the number of categories of the response variable. The eigenvectors are shown per feature under each LD axis column. These eigenvectors show how each feature contributes to each LD axis (strength and direction, given by the magnitude and the sign respectively). These axes are different from the PC axes of a PCA because the number of PC axes will correspond to the features/predictors. For instance, a PCA on the 15 features will return 15 PC axes.
+
+
+### a) Site
+```{r}
+LDAmod_s$scaling
+```
+
+### b) Population
+```{r}
+LDAmod_p$scaling
+```
+
+
+## 4. LDA scores using predict()
+### a) Site
+```{r}
+LDAout_s <- predict(LDAmod_s)
+summary(LDAout_s)
+```
+```{r}
+head(LDAout_s$x) #scores
+```
+
+Graphing these results:
+```{r}
+# Binding the scores with the original data:
+dat_s <- cbind(dat, LDAout_s$x)
+
+# Plotting the results:
+ggplot(data=dat_s, aes(x=LD1, y=LD2, colour=Site, shape=Site)) +
+  geom_point() +
+  theme(legend.position="right")
+```
+
+> Figure 1: The LD1 and LD2 scores for Site. Sites are coloured and noted on the legend. 3_Timmins is associated with a higher score for LD1 and LD2, 2_KSR with a higher LD1 score but a lower LD2 score, and 1_BEF with a lower LD1 but higher LD2 score. Data was collected for 15 flowering and vegetative traits across 4 years for plants from six different populations grown in three common garden sites.
+
+
+### b) Population
+```{r}
+LDAout_p <- predict(LDAmod_p)
+summary(LDAout_p)
+```
+
+```{r}
+head(LDAout_p$x) #scores
+```
+
+Graphing the results:
+```{r}
+# Binding the scores with the original data:
+dat_p <- cbind(dat, LDAout_p$x)
+
+# Plotting the results:
+ggplot(data=dat_p, aes(x=LD1, y=LD2, colour=Pop, shape=Pop)) +
+  geom_point() +
+  theme(legend.position="right")
+```
+
+> Figure 2: The LD1 and LD2 scores for Population. Populations are coloured and noted on the legend. J, S, and T are denoted by a generally higher LD1 score, and A, C, and E by a lower one. LD2 shows lower differentiation between populations, but population R generally has a higher score and population C generally a lower one. Data was collected for 15 flowering and vegetative traits across 4 years for plants from six different populations grown in three common garden sites.
+
+## 5. Explaining what I learned about the Lythrum data from the LDA models
+
+### a) Site
+The LDA model for site showed that LD1 and LD2 were able to successfully distinguish between different sites (Figure 1). 3_Timmins was associated with a higher score for LD1 and LD2, 2_KSR with a higher LD1 score but a lower LD2 score, and 1_BEF with a lower LD1 but higher LD2 score. The traits that contributed the most were Flwr08 & FVeg08 for LD1 and Flwr10 & FVeg08 for LD2 (Table 1). This indicates that flowering and vegetative traits both contribute to distinguishing between growth sites. Biologically, this may mean that floral and vegetative traits are to a degree phenotypically-plastic/under environmental control. When grown in a common environment, plants can be distinguished from individuals of the _same_ population grown in a different common garden, because different environments will cause different floral and vegetative phenotypes.
+
+```{r}
+LDAmod_s$scaling
+```
+
+> Table 1: LD scores for LD1 and LD2 of a Site LDA model. 
+
+
+### b) Population
+The LDA model for Population was only able to clearly distinguish between two groups of population along the LD1 axis (Figure 2). Populations J, S, and T had a generally higher LD1 score, and A, C, and E had a lower one. The most traits with the highest loadings for the LD1 axis were vegetative traits (FVeg10 being the highest of all). This indicates that vegetative traits are likely under genetic control, not environmental. In other words, even when grown in different common gardens, plants from the same source population will express similar phenotypes.
+
+```{r}
+LDAmod_p$scaling
+```
+
+> Table 2: LD scores for the 5 LD axes of a Population LDA model.
+
+
+### c) Comparing to PCA results
+
+The PCA results showed that PC1 was affected by all measurements, and PC2 was affected by InfMass and Flwr, and that generally the same measurements in different years were collinear. This makes sense with the results of the LDA models. Generally, flowering traits across years were better at identifying Site, and vegetative traits across years were better at identifying Pop. For both Site and Pop, different years had different strengths of loading, but were generally similarly strong in contributing, indicating collinearity (e.g. within FVeg traits/years). The PCA was also most capable of identifying the Sites, consistent with the LDA where Sites were easily-identifiable groups when plotted.
+
+
